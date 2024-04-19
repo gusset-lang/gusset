@@ -2,7 +2,7 @@
 
 Gusset is a compile-to-JS language with syntax akin to Go. It shares many features with Go, making it familiar to programmers versed in both languages.
 
-<img style="text-align:center; margin-bottom: 20px;" src="https://avatars.githubusercontent.com/u/166648156?s=200 />
+<img style="text-align:center; margin-bottom: 20px;" src="https://avatars.githubusercontent.com/u/166648156?s=200" />
 
 ## Goals
 
