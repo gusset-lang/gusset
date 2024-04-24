@@ -29,11 +29,11 @@ func Exec(l *Lexer) {
 			continue
 		}
 
-		matchedSymbolic, err := l.matchRuneSequence(start, r)
+		matchedRuneSeq, err := l.matchRuneSequence(start, r)
 		if err != nil {
 			break
 		}
-		if matchedSymbolic {
+		if matchedRuneSeq {
 			continue
 		}
 
@@ -51,7 +51,6 @@ func Exec(l *Lexer) {
 			continue
 		}
 
-		// match template
 		if r == '`' {
 			if err := l.collectTemplateLiteral(start); err != nil {
 				break

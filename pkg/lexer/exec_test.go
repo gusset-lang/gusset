@@ -802,6 +802,78 @@ var testCases = []lexerTestCase{
 			}`,
 		),
 	},
+	{
+		name: "if-else",
+		tokens: tokens{
+			IF, IDENT, OPEN_BRACE, NEWLINE,
+			IDENT, ACCESS, IDENT, ASSIGN, BOOL, NEWLINE,
+			CLOSE_BRACE, ELSE, OPEN_BRACE, CLOSE_BRACE, EOF,
+		},
+		idents: []string{"condition", "user", "enabled"},
+		input: multilineInput(
+			`if condition {
+				user.enabled = true
+			} else {}`,
+		),
+	},
+	{
+		name: "switch",
+		tokens: tokens{
+			SWITCH, OPEN_BRACE, NEWLINE,
+			IDENT, ARROW, IDENT, ACCESS, IDENT, OPEN_PAREN, STRING, CLOSE_PAREN, COMMA, NEWLINE,
+			DEFAULT, ARROW, IDENT, OPEN_PAREN, STRING, CLOSE_PAREN, COMMA, NEWLINE,
+			CLOSE_BRACE, EOF,
+		},
+		idents: []string{"cond1", "console", "Log", "panic"},
+		input: `switch {
+			cond1 => console.Log("cond1"),
+			default => panic("bad"),
+		}`,
+	},
+	{
+		name: "for simple",
+		tokens: tokens{
+			FOR, OPEN_BRACE, NEWLINE,
+			BREAK, NEWLINE,
+			CLOSE_BRACE, EOF,
+		},
+		idents: nil,
+		input: `for {
+			break
+		}`,
+	},
+	{
+		name: "for range",
+		tokens: tokens{
+			FOR, IDENT, COMMA, IDENT, SHORT_VAR, IDENT, IDENT, OPEN_BRACE, CLOSE_BRACE, EOF,
+		},
+		idents: []string{"i", "v", "range", "list"},
+		input:  `for i, v := range list {}`,
+	},
+	{
+		name: "for step",
+		tokens: tokens{
+			FOR, IDENT, SHORT_VAR, INT, SEMI, IDENT, LT, INT, SEMI, IDENT, ASSIGN_INC, OPEN_BRACE, CLOSE_BRACE, EOF,
+		},
+		idents: []string{"i", "i", "i"},
+		input:  `for i := 0; i < 10; i++ {}`,
+	},
+	{
+		name: "match",
+		tokens: tokens{
+			MATCH, IDENT, OPEN_BRACE, NEWLINE,
+			STRING, ARROW, IDENT, ACCESS, IDENT, COMMA, NEWLINE,
+			STRING, ARROW, IDENT, ACCESS, IDENT, COMMA, NEWLINE,
+			OMIT, ARROW, IDENT, ACCESS, IDENT, COMMA, NEWLINE,
+			CLOSE_BRACE, EOF,
+		},
+		idents: []string{"q", "query", "include", "query", "expect", "query", "unknown"},
+		input: `match q {
+			"include" => query.include,
+			"expect" => query.expect,
+			_ => query.unknown,
+		}`,
+	},
 }
 
 func TestLexer(t *testing.T) {
@@ -820,6 +892,7 @@ func TestLexer(t *testing.T) {
 				assert.True(t, r.Item.Pos.IsAfter(lastPos))
 				require.Equalf(t, testCase.tokens[currentToken], r.Item.Token, "expected token [%s]; received [%s]", testCase.tokens[currentToken], r.Item.Token)
 				if r.Item.Token == IDENT {
+					require.True(t, currentIdent <= len(testCase.idents)-1, "test case [%s] did not specify enough identifiers", testCase.name)
 					require.Equalf(t, testCase.idents[currentIdent], r.Item.String, "expected ident [%s]; received [%s]", testCase.idents[currentIdent], r.Item.String)
 					currentIdent++
 				}

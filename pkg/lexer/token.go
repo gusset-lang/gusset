@@ -1,8 +1,23 @@
 package lexer
 
+import (
+	"sort"
+)
+
 func init() {
 	runeSequenceTree = make(runeTree)
-	for t, runeSet := range runeSequences {
+
+	keys := make([]Token, 0, len(runeSequences))
+	for k := range runeSequences {
+		keys = append(keys, k)
+	}
+
+	sort.Slice(keys, func(i, j int) bool {
+		return len(runeSequences[keys[i]]) < len(runeSequences[keys[j]])
+	})
+
+	for _, t := range keys {
+		runeSet := runeSequences[t]
 		runeSequenceTree.insert(
 			t,
 			rune(runeSet[0]),
@@ -96,6 +111,7 @@ const (
 	ACCESS
 	SEMI
 	ARROW
+	OMIT
 
 	// Keywords
 	PACKAGE
@@ -106,6 +122,14 @@ const (
 	ANY
 	INTERFACE
 	RETURN
+	IF
+	ELSE
+	SWITCH
+	DEFAULT
+	CONTINUE
+	BREAK
+	FOR
+	MATCH
 )
 
 func (t Token) String() string {
@@ -195,6 +219,7 @@ var tokenNames = [...]string{
 	ACCESS:        "ACCESS",
 	SEMI:          "SEMI",
 	ARROW:         "ARROW",
+	OMIT:          "OMIT",
 
 	// Keywords
 	PACKAGE:   "PACKAGE",
@@ -205,6 +230,14 @@ var tokenNames = [...]string{
 	ANY:       "ANY",
 	INTERFACE: "INTERFACE",
 	RETURN:    "RETURN",
+	IF:        "IF",
+	ELSE:      "ELSE",
+	SWITCH:    "SWITCH",
+	DEFAULT:   "DEFAULT",
+	CONTINUE:  "CONTINUE",
+	BREAK:     "BREAK",
+	FOR:       "FOR",
+	MATCH:     "MATCH",
 }
 
 var runeSequenceTree runeTree
@@ -261,6 +294,7 @@ var runeSequences = map[Token]string{
 	ACCESS:        ".",
 	SEMI:          ";",
 	ARROW:         "=>",
+	OMIT:          "_",
 }
 
 type runeTree map[rune]runeTreeNode
@@ -279,7 +313,9 @@ func (tree runeTree) insert(t Token, r rune, runes []rune) {
 	if len(runes) == 0 {
 		node.t = &t
 	} else {
-		node.children = make(runeTree)
+		if node.children == nil {
+			node.children = make(runeTree)
+		}
 		node.children.insert(t, runes[0], runes[1:])
 	}
 
@@ -300,6 +336,14 @@ var reserved = map[string]Token{
 	"nil":       NIL,
 	"interface": INTERFACE,
 	"return":    RETURN,
+	"if":        IF,
+	"else":      ELSE,
+	"switch":    SWITCH,
+	"default":   DEFAULT,
+	"continue":  CONTINUE,
+	"break":     BREAK,
+	"for":       FOR,
+	"match":     MATCH,
 
 	"symbol": T_SYMBOL,
 	"string": T_STRING,
