@@ -2,10 +2,15 @@ package lexer
 
 import (
 	"bufio"
+	"errors"
+	"fmt"
 	"io"
 	"strings"
 	"unicode"
-	"unicode/utf8"
+)
+
+var (
+	ErrLexer = errors.New("lexer error")
 )
 
 const EOF_RUNE = rune(-1)
@@ -28,9 +33,12 @@ func itemResult(item Item) Result {
 	}
 }
 
+type runeMatcher func(rune) bool
+
 type Position struct {
-	Line int
-	Col  int
+	Line       int
+	Col        int
+	MaxPrevCol int
 }
 
 func (p Position) IsAfter(t Position) bool {
@@ -51,7 +59,13 @@ func (p Position) Add(line, col int) Position {
 	}
 }
 
-type runeMatcher func(rune) bool
+func New(reader io.Reader, items chan Result) *Lexer {
+	return &Lexer{
+		Position{Line: 1, Col: 0},
+		bufio.NewReader(reader),
+		items,
+	}
+}
 
 type Lexer struct {
 	pos    Position
@@ -59,38 +73,16 @@ type Lexer struct {
 	result chan Result
 }
 
-// nextRune reads a rune and handles the EOF or unexpected errors.
-// Bool result indicates whether execution should continue.
-func (l *Lexer) nextRune() (rune, error) {
-	r, _, err := l.reader.ReadRune()
-	if err != nil {
-		if err == io.EOF {
-			return EOF_RUNE, nil
-		}
-		l.sendError(err)
-		return 0, err
-	}
-	return r, nil
-}
-
 func (l *Lexer) sendEOF() {
 	l.result <- itemResult(Item{l.pos, EOF, ""})
 }
 
-func (l *Lexer) sendNewLine() {
-	l.result <- itemResult(Item{l.pos, NEWLINE, "\n"})
+func (l *Lexer) sendNewLine(pos Position) {
+	l.result <- itemResult(Item{pos, NEWLINE, "\n"})
 }
 
 func (l *Lexer) sendItem(item *Item) {
 	l.result <- itemResult(*item)
-}
-
-func (l *Lexer) sendShortVar() {
-	l.result <- itemResult(Item{l.pos, SHORT_VAR, ":="})
-}
-
-func (l *Lexer) sendColon() {
-	l.result <- itemResult(Item{l.pos, COLON, ":"})
 }
 
 func (l *Lexer) sendError(err error) {
@@ -99,92 +91,146 @@ func (l *Lexer) sendError(err error) {
 	}
 }
 
-func (l *Lexer) sendIllegal(char rune) {
-	l.result <- itemResult(Item{l.pos, ILLEGAL, string(char)})
+func (l *Lexer) next() (rune, error) {
+	r, _, err := l.reader.ReadRune()
+	if err != nil {
+		if err == io.EOF {
+			return EOF_RUNE, nil
+		}
+		l.sendError(err)
+		return 0, err
+	}
+	if r == '\n' {
+		l.pos.MaxPrevCol = l.pos.Col
+		l.pos.Col = 0
+		l.pos.Line++
+	} else {
+		l.pos.Col++
+	}
+	return r, nil
 }
 
-// backup unreads a rune
-func (l *Lexer) backup() error {
+func (l *Lexer) skip(n int) error {
+	if _, err := l.reader.Discard(n); err != nil {
+		l.sendError(err)
+		return err
+	}
+	l.pos.Col += n
+	return nil
+}
+
+func (l *Lexer) backup(r rune) error {
 	if err := l.reader.UnreadRune(); err != nil {
 		l.sendError(err)
 		return err
+	}
+	if r == '\n' {
+		l.pos.Col = l.pos.MaxPrevCol
+		l.pos.MaxPrevCol = 0
+		l.pos.Line--
+	} else {
+		l.pos.Col--
 	}
 	return nil
 }
 
 func (l *Lexer) peek() (rune, error) {
-	// Peek the first byte to determine the size of the rune
 	b, err := l.reader.Peek(1)
 	if err != nil {
+		l.sendError(err)
 		return 0, err
 	}
+	return rune(b[0]), nil
+}
 
-	runeSize := 1
-	for i := range b {
-		if b[i] < 0x80 || b[i] >= 0xC0 {
+func (l *Lexer) peek2() ([2]rune, error) {
+	b, err := l.reader.Peek(2)
+	if err != nil {
+		return [2]rune{}, err
+	}
+	return [2]rune{rune(b[0]), rune(b[1])}, nil
+}
+
+func (l *Lexer) matchRuneSequence(start Position, r rune) (bool, error) {
+	node, ok := runeSequenceTree[r]
+	if !ok {
+		return false, nil
+	}
+	if node.t == nil {
+		return false, fmt.Errorf("%w: matched leaf node of symbolic tree has no token", ErrLexer)
+	}
+	item := &Item{start, *node.t, runeSequences[*node.t]}
+
+	if len(node.children) == 0 {
+		l.sendItem(item)
+		return true, nil
+	}
+
+	nextRunes, err := l.peek2()
+	if err != nil {
+		return false, err
+	}
+
+	secondNode, ok := node.children[nextRunes[0]]
+	if !ok {
+		l.sendItem(item)
+		return true, nil
+	}
+	if secondNode.t == nil {
+		return false, fmt.Errorf("%w: matched leaf node of symbolic tree has no token", ErrLexer)
+	}
+	item = &Item{start, *secondNode.t, runeSequences[*secondNode.t]}
+	if err := l.skip(1); err != nil {
+		return false, err
+	}
+	if len(secondNode.children) == 0 {
+		l.sendItem(item)
+		return true, nil
+	}
+
+	thirdNode, ok := node.children[nextRunes[1]]
+	if !ok {
+		l.sendItem(item)
+		return true, nil
+	}
+	if thirdNode.t == nil {
+		return false, fmt.Errorf("%w: matched leaf node of symbolic tree has no token", ErrLexer)
+	}
+	l.sendItem(&Item{start, *thirdNode.t, runeSequences[*thirdNode.t]})
+	if err := l.skip(1); err != nil {
+		return false, err
+	}
+	return true, nil
+}
+
+func (l *Lexer) collectSymbol(start Position) error {
+	var seq strings.Builder
+
+	for {
+		r, err := l.next()
+		if err != nil {
+			return err
+		}
+		if r == EOF_RUNE {
 			break
 		}
-		runeSize++
+		if r == '_' || unicode.IsLetter(r) || unicode.IsNumber(r) {
+			seq.WriteRune(r)
+			continue
+		}
+		if err := l.backup(r); err != nil {
+			return err
+		}
+		break
 	}
 
-	// Peek the required number of bytes to read the full rune
-	b, err = l.reader.Peek(runeSize)
-	if err != nil {
-		return 0, err
-	}
-
-	// Decode the rune from the peeked bytes
-	r, _ := utf8.DecodeRune(b)
-	return r, nil
+	l.sendItem(&Item{start, SYMBOL, ":" + seq.String()})
+	return nil
 }
 
-func (l *Lexer) advance(n int) {
-	l.pos.Col += n
-}
-
-// nextLine moves the position to the first column of the next line.
-func (l *Lexer) nextLine() {
-	l.pos.Line++
-	l.pos.Col = 0
-}
-
-// nextCol moves the position to the next column.
-func (l *Lexer) nextCol() {
-	l.pos.Col++
-}
-
-// itemFromRune finds if the rune is any single-rune token that
-// does not conflict with a multi-rune token.
-func (l *Lexer) itemFromRune(r rune) *Item {
-	var item *Item
-	switch r {
-	case '(':
-		item = &Item{l.pos, OPEN_PAREN, "("}
-	case ')':
-		item = &Item{l.pos, CLOSE_PAREN, ")"}
-	case '{':
-		item = &Item{l.pos, OPEN_BRACE, "{"}
-	case '}':
-		item = &Item{l.pos, CLOSE_BRACE, "}"}
-	case '[':
-		item = &Item{l.pos, OPEN_BRACKET, "["}
-	case ']':
-		item = &Item{l.pos, CLOSE_BRACKET, "]"}
-	case '=':
-		item = &Item{l.pos, ASSIGN, "="} // TODO: this will conflict with equality operator
-	case ',':
-		item = &Item{l.pos, COMMA, ","}
-	case ';':
-		item = &Item{l.pos, SEMI, ";"}
-	}
-	return item
-}
-
-// itemFromAlphanum finds an item from an alphanumeric sequence.
-// The return int is the number of columns to advance.
-func (l *Lexer) itemFromAlphanum(startPos Position) (*Item, int, error) {
+func (l *Lexer) itemFromAlphanum(startPos Position, initial rune) (*Item, error) {
 	var seq strings.Builder
-	var runeCount int
+	seq.WriteRune(initial)
 
 	collectSequence := func() *Item {
 		seqString := seq.String()
@@ -205,76 +251,88 @@ func (l *Lexer) itemFromAlphanum(startPos Position) (*Item, int, error) {
 	}
 
 	for {
-		r, err := l.nextRune()
+		r, err := l.next()
 		if err != nil {
-			return nil, 0, err
+			return nil, err
 		}
 		if r == EOF_RUNE {
-			return collectSequence(), runeCount, nil
+			return collectSequence(), nil
 		}
 
 		if r == '_' || unicode.IsLetter(r) || unicode.IsNumber(r) {
 			seq.WriteRune(r)
-			runeCount++
 			continue
 		}
 
-		if err := l.backup(); err != nil {
-			return nil, 0, err
+		if err := l.backup(r); err != nil {
+			return nil, err
 		}
-
-		if seq.Len() == 0 {
-			return nil, 0, nil
-		}
-
-		return collectSequence(), runeCount, nil
+		break
 	}
+
+	return collectSequence(), nil
 }
 
-func (l *Lexer) itemFromStringLiteral(startPos Position) (*Item, int, error) {
+func (l *Lexer) collectTemplateLiteral(start Position) error {
 	var seq strings.Builder
-	var runeCount int
-
 	for {
-		r, err := l.nextRune()
+		r, err := l.next()
 		if err != nil {
-			return nil, 0, err
+			return err
+		}
+		if r == EOF_RUNE {
+			// TODO: illegal
 		}
 		seq.WriteRune(r)
-		runeCount++
-		if r == '"' && runeCount > 1 {
+		if r == '`' && seq.Len() > 1 {
 			break
 		}
 	}
-
-	return &Item{startPos, STRING, seq.String()}, runeCount, nil
+	l.sendItem(&Item{start, TEMPLATE, "`" + seq.String()})
+	return nil
 }
 
-func (l *Lexer) itemFromNumeric(startPos Position) (*Item, int, error) {
+func (l *Lexer) collectStringLiteral(start Position) error {
+	var seq strings.Builder
+	var prevRune rune
+
+	for {
+		r, err := l.next()
+		if err != nil {
+			return err
+		}
+		if r == EOF_RUNE {
+			// TODO: illegal
+		}
+		seq.WriteRune(r)
+		if r == '"' && prevRune != '\\' && seq.Len() > 1 {
+			break
+		}
+		prevRune = r
+	}
+	l.sendItem(&Item{start, STRING, "\"" + seq.String()})
+	return nil
+}
+
+func (l *Lexer) itemFromNumeric(start Position, initial rune) (*Item, error) {
 	var item *Item
 	var seq strings.Builder
-	var runeCount int
-	digit, err := l.nextRune()
-	if err != nil {
-		return nil, 0, err
-	}
-	seq.WriteRune(digit)
-	runeCount++
+	seq.WriteRune(initial)
 
 	nextPeeked, err := l.peek()
 	if err != nil {
-		return nil, 0, err
+		return nil, err
 	}
 
-	if digit == '0' && nextPeeked != '.' {
-		next, err := l.nextRune()
+	if initial == '0' && nextPeeked != '.' {
+		next, err := l.next()
 		if err != nil {
-			return nil, 0, err
+			return nil, err
 		}
 
 		writeWhileMatch := func(m runeMatcher) error {
 			for {
-				r, err := l.nextRune()
+				r, err := l.next()
 				if err != nil {
 					return err
 				}
@@ -283,9 +341,8 @@ func (l *Lexer) itemFromNumeric(startPos Position) (*Item, int, error) {
 				}
 				if m(r) {
 					seq.WriteRune(r)
-					runeCount++
 				} else {
-					return l.backup()
+					return l.backup(r)
 				}
 			}
 		}
@@ -293,49 +350,45 @@ func (l *Lexer) itemFromNumeric(startPos Position) (*Item, int, error) {
 		switch {
 		case next == 'b' || next == 'B':
 			seq.WriteRune(next)
-			runeCount++
 			if err := writeWhileMatch(func(r rune) bool {
 				return r == '0' || r == '1'
 			}); err != nil {
-				return nil, 0, err
+				return nil, err
 			}
 		case next == 'x' || next == 'X':
 			seq.WriteRune(next)
-			runeCount++
 			if err := writeWhileMatch(func(r rune) bool {
 				return unicode.Is(unicode.Hex_Digit, r)
 			}); err != nil {
-				return nil, 0, err
+				return nil, err
 			}
 		case unicode.IsDigit(next):
 			seq.WriteRune(next)
-			runeCount++
 			if err := writeWhileMatch(unicode.IsDigit); err != nil {
-				return nil, 0, err
+				return nil, err
 			}
 		default:
-			if err := l.backup(); err != nil {
-				return nil, 0, err
+			if err := l.backup(next); err != nil {
+				return nil, err
 			}
 		}
-		item = &Item{startPos, INT, seq.String()}
+		item = &Item{start, INT, seq.String()}
 	} else {
 		fractional := false
 		exponent := false
 		for {
-			r, err := l.nextRune()
+			r, err := l.next()
 			if err != nil {
-				return nil, 0, err
+				return nil, err
 			}
 			if r == EOF_RUNE {
 				break
 			}
 			if r == '.' || r == 'e' || unicode.IsDigit(r) {
 				if (fractional && r == '.') || (exponent && r == 'e') {
-					return &Item{startPos.Add(0, runeCount), ILLEGAL, string(r)}, 1, nil
+					return &Item{l.pos, ILLEGAL, string(r)}, nil
 				}
 				seq.WriteRune(r)
-				runeCount++
 
 				if r == '.' {
 					fractional = true
@@ -344,25 +397,17 @@ func (l *Lexer) itemFromNumeric(startPos Position) (*Item, int, error) {
 					exponent = true
 				}
 			} else {
-				if err := l.backup(); err != nil {
-					return nil, 0, err
+				if err := l.backup(r); err != nil {
+					return nil, err
 				}
 				break
 			}
 		}
-		item = &Item{startPos, INT, seq.String()}
+		item = &Item{start, INT, seq.String()}
 		if fractional || exponent {
 			item.Token = FLOAT
 		}
 	}
 
-	return item, runeCount, nil
-}
-
-func New(reader io.Reader, items chan Result) *Lexer {
-	return &Lexer{
-		Position{Line: 1, Col: 0},
-		bufio.NewReader(reader),
-		items,
-	}
+	return item, nil
 }

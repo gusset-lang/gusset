@@ -8,7 +8,7 @@ Gusset is a compile-to-JS language with syntax akin to Go. It shares many featur
 
 1. Facilitate writing clear and correct code for JavaScript applications.
 2. Improve on JavaScript's lack of runtime guarantees with strict types and compile-time checks.
-3. Expand upon Go's functionality for frontend development with features like list/map comprehension, enums, and pattern matching.
+3. Expand upon Go's functionality for frontend development with features like list/map comprehension, enums, pattern matching, and native JSON and JSX.
 
 To achieve this, Gusset employs Go's type system and syntax supplemented with additions (*gussets*) from Rust, Ruby, and JavaScript itself.
 
