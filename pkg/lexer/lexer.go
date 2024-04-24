@@ -292,6 +292,62 @@ func (l *Lexer) collectTemplateLiteral(start Position) error {
 	return nil
 }
 
+func (l *Lexer) collectStructuredLiteral(start Position) error {
+	var seq strings.Builder
+	var delim rune
+	for {
+		r, err := l.next()
+		if err != nil {
+			return err
+		}
+		if r == EOF_RUNE {
+			// todo: illegal
+		}
+		seq.WriteRune(r)
+		if unicode.IsLetter(r) {
+			continue
+		}
+		if !(r == '{' || r == '(' || r == '|') {
+			// todo: illegal
+		}
+		delim = r
+		break
+	}
+
+	if delim == 0 {
+		return fmt.Errorf("%w: expected matched delimeter", ErrLexer)
+	}
+
+	matchedDelim, ok := structuredLiteralDelimiters[delim]
+	if !ok {
+		return fmt.Errorf("%w: expected to have a matched delimeter for %s", ErrLexer, string(delim))
+	}
+
+	delimOffset := 1
+
+	for {
+		r, err := l.next()
+		if err != nil {
+			return err
+		}
+		if r == EOF_RUNE {
+			// TODO: illegal
+		}
+		seq.WriteRune(r)
+		if r == delim {
+			delimOffset++
+		}
+		if r == matchedDelim {
+			delimOffset--
+			if delimOffset == 0 {
+				break
+			}
+		}
+	}
+	l.sendItem(&Item{start, STRUCTURED, "#" + seq.String()})
+	return nil
+}
+
 func (l *Lexer) collectStringLiteral(start Position) error {
 	var seq strings.Builder
 	var prevRune rune

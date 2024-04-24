@@ -349,6 +349,7 @@ var testCases = []lexerTestCase{
 	varTestCase("Test", T_INT),
 	varTestCase("Test", T_FLOAT),
 	varTestCase("Test", T_BOOL),
+	varTestCase("Test", T_RECORD),
 	varTestCase("Test", ANY),
 	{
 		name:   "var any nil",
@@ -873,6 +874,24 @@ var testCases = []lexerTestCase{
 			"expect" => query.expect,
 			_ => query.unknown,
 		}`,
+	},
+	{
+		name:   "structured json literal parens",
+		tokens: tokens{VAR, IDENT, ASSIGN, STRUCTURED, EOF},
+		idents: []string{"q"},
+		input:  `var q = #json({"test": [1, 2, 3]})`,
+	},
+	{
+		name:   "structured json literal brackets",
+		tokens: tokens{VAR, IDENT, ASSIGN, STRUCTURED, EOF},
+		idents: []string{"q"},
+		input:  `var q = #json[{"test": [1, 2, 3]}]`,
+	},
+	{
+		name:   "structured json literal braces",
+		tokens: tokens{VAR, IDENT, ASSIGN, STRUCTURED, EOF},
+		idents: []string{"q"},
+		input:  `var q = #json{{"test": [1, 2, 3]}}`,
 	},
 }
 

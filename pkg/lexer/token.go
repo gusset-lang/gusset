@@ -44,11 +44,13 @@ const (
 	T_STRUCT
 	T_MAP
 	T_ENUM
+	T_RECORD
 
 	// Literals
 	SYMBOL
 	STRING
 	TEMPLATE
+	STRUCTURED
 	INT
 	FLOAT
 	BOOL
@@ -112,6 +114,7 @@ const (
 	SEMI
 	ARROW
 	OMIT
+	SPREAD
 
 	// Keywords
 	PACKAGE
@@ -152,15 +155,17 @@ var tokenNames = [...]string{
 	T_STRUCT: "T_STRUCT",
 	T_MAP:    "T_MAP",
 	T_ENUM:   "T_ENUM",
+	T_RECORD: "T_RECORD",
 
 	// Literals
-	SYMBOL:   "SYMBOL",
-	STRING:   "STRING",
-	TEMPLATE: "TEMPLATE",
-	INT:      "INT",
-	FLOAT:    "FLOAT",
-	BOOL:     "BOOL",
-	NIL:      "NIL",
+	SYMBOL:     "SYMBOL",
+	STRING:     "STRING",
+	TEMPLATE:   "TEMPLATE",
+	STRUCTURED: "STRUCTURED",
+	INT:        "INT",
+	FLOAT:      "FLOAT",
+	BOOL:       "BOOL",
+	NIL:        "NIL",
 
 	// Decimal arithmetic
 	ADD:  "ADD",
@@ -220,6 +225,7 @@ var tokenNames = [...]string{
 	SEMI:          "SEMI",
 	ARROW:         "ARROW",
 	OMIT:          "OMIT",
+	SPREAD:        "SPREAD",
 
 	// Keywords
 	PACKAGE:   "PACKAGE",
@@ -295,6 +301,7 @@ var runeSequences = map[Token]string{
 	SEMI:          ";",
 	ARROW:         "=>",
 	OMIT:          "_",
+	SPREAD:        "..",
 }
 
 type runeTree map[rune]runeTreeNode
@@ -354,6 +361,7 @@ var reserved = map[string]Token{
 	"struct": T_STRUCT,
 	"map":    T_MAP,
 	"enum":   T_ENUM,
+	"record": T_RECORD,
 }
 
 // ReservedWord gets the alphanum string reserved for the given token, if it exists.
@@ -365,4 +373,10 @@ func ReservedWord(t Token) string {
 		}
 	}
 	return ""
+}
+
+var structuredLiteralDelimiters = map[rune]rune{
+	'{': '}',
+	'(': ')',
+	'[': ']',
 }

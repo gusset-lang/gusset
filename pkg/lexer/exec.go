@@ -58,6 +58,13 @@ func Exec(l *Lexer) {
 			continue
 		}
 
+		if r == '#' {
+			if err := l.collectStructuredLiteral(start); err != nil {
+				break
+			}
+			continue
+		}
+
 		if unicode.IsDigit(r) {
 			item, err := l.itemFromNumeric(start, r)
 			if err != nil {
